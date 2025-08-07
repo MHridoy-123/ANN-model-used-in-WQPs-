@@ -1,0 +1,1120 @@
+library(readr)
+ANN_water_quality_data_2020 <- read_csv("ANN_water quality data_2020.csv")
+View(ANN_water_quality_data_2020)
+
+
+head(ANN_water_quality_data_2020)
+
+char.expand(ANN_water_quality_data_2020)
+
+
+
+library(corrplot)
+library(reshape2)
+
+
+
+# Step 2: Clean up messy column names
+colnames(ANN_water_quality_data_2020) <- gsub("[\r\n\"]", "", colnames(ANN_water_quality_data_2020))  # Remove newline and quotes
+colnames(ANN_water_quality_data_2020) <- trimws(colnames(ANN_water_quality_data_2020))  # Trim white space
+
+# Step 3: View the cleaned names
+names(ANN_water_quality_data_2020)
+
+# Step 4: Rename to your preferred names (optional but clear)
+colnames(ANN_water_quality_data_2020) <- c("Date", "NH3", "Temp", "EC", "Turbidity", "Cl", "PO4", "As", "Fe")
+
+# Check
+head(ANN_water_quality_data_2020)
+
+# === Load required libraries ===
+install.packages(c("dplyr", "corrplot", "janitor"))  # Run only once
+library(dplyr)
+library(corrplot)
+library(janitor)
+library(ggplot2)
+library(tidyr)
+
+# === Step 4: Drop 'date' and Convert All to Numeric ===
+data_numeric <- ANN_water_quality_data_2020 %>%
+  select(-Date) %>%
+  mutate(across(everything(), ~as.numeric(as.character(.))))
+
+# === Step 5: Compute Correlation Matrix ===
+cor_matrix <- cor(data_numeric, use = "complete.obs")
+
+# === Step 6: Melt the Matrix for ggplot ===
+cor_melted <- melt(cor_matrix)
+
+# === Step 7: Create Publication-Quality Heatmap ===
+heatmap_plot <- ggplot(cor_melted, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "skyblue", linewidth = 0.7) +
+  scale_fill_gradient2(low = "red", mid = "skyblue", high = "blue",
+                       midpoint = 0, limit = c(-1, 1), name = "Correlation") +
+  geom_text(aes(label = sprintf("%.2f", value)), color = "black", size = 4) +
+  theme_light(base_size = 11) +
+  labs(title = "",
+       x = NULL, y = NULL) +
+  theme(
+    axis.text.x = element_text(angle = 0, vjust = 1, hjust = 1),
+    panel.grid.major = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+# === Step 8: Display the Plot ===
+print(heatmap_plot)
+
+
+
+
+
+
+
+
+Summary table//
+  
+  
+
+
+
+  # === Summary Table: Mean, SD, Min, Max for Each Parameter ===
+  summary_stats <- data_numeric %>%
+  summarise(across(everything(), list(
+    mean = ~mean(. , na.rm = TRUE),
+    sd   = ~sd(., na.rm = TRUE),
+    min  = ~min(., na.rm = TRUE),
+    max  = ~max(., na.rm = TRUE)
+  ))) %>%
+  # Reshape the summary for easier reading
+  pivot_longer(everything(),
+               names_to = c("parameter", ".value"),
+               names_pattern = "(.*)_(.*)")
+
+# Print the summary table
+print(summary_stats)
+
+
+write.csv(summary_stats, "water_quality_summary_stats.csv", row.names = FALSE)
+
+
+
+##Machine learnig_Model_ANN
+
+
+# Load necessary packages
+library(caret)
+library(ggplot2)
+library(Metrics)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Prepare the dataset again without 'date'
+data_model <- ANN_water_quality_data_2020 %>%
+  select(-Date) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  na.omit()
+
+# Split into training (80%) and testing (20%)
+train_index <- createDataPartition(data_model$As, p = 0.8, list = FALSE)
+train_data <- data_model[train_index, ]
+test_data  <- data_model[-train_index, ]
+
+
+library(nnet)
+
+# Train model for Arsenic (As)
+model_as <- nnet(As ~ ., data = train_data, size = 5, linout = TRUE, trace = FALSE)
+
+# Train model for Iron (Fe)
+model_fe <- nnet(Fe ~ ., data = train_data, size = 5, linout = TRUE, trace = FALSE)
+
+
+
+
+# Predictions on test data
+pred_as <- predict(model_as, newdata = test_data)
+pred_fe <- predict(model_fe, newdata = test_data)
+
+# Actual values
+actual_as <- test_data$As
+actual_fe <- test_data$Fe
+
+
+# Define a custom function to summarize metrics
+evaluate_performance <- function(actual, predicted, name = "As or Fe") {
+  data.frame(
+    Target = name,
+    RMSE = rmse(actual, predicted),
+    MAE = mae(actual, predicted),
+    R2 = R2(predicted, actual)
+  )
+}
+
+# Calculate metrics for As and Fe
+metrics_as <- evaluate_performance(actual_as, pred_as, "As")
+metrics_fe <- evaluate_performance(actual_fe, pred_fe, "Fe")
+
+# Combine
+performance_metrics <- rbind(metrics_as, metrics_fe)
+print(performance_metrics)
+
+
+
+
+
+
+
+
+
+
+
+library(ggplot2)
+library(gridExtra)
+
+# Residuals data frames
+df_res_as <- data.frame(predicted = pred_as, residuals = residuals_as, parameter = "As")
+df_res_fe <- data.frame(predicted = pred_fe, residuals = residuals_fe, parameter = "Fe")
+
+# 1) Residuals vs Predicted (As)
+plot_res_as <- ggplot(df_res_as, aes(x = predicted, y = residuals)) +
+  geom_point(color = "red", alpha = 0.7) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(title = "Residuals vs Predicted (As)", x = "Predicted As", y = "Residuals") +
+  theme_classic(base_size = 12)
+
+# 2) Residuals vs Predicted (Fe)
+plot_res_fe <- ggplot(df_res_fe, aes(x = predicted, y = residuals)) +
+  geom_point(color = "darkgreen", alpha = 0.7) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(title = "Residuals vs Predicted (Fe)", x = "Predicted Fe", y = "Residuals") +
+  theme_classic(base_size = 12)
+
+# 3) Histogram of residuals combined (both As and Fe)
+df_res_combined <- rbind(df_res_as, df_res_fe)
+
+plot_hist <- ggplot(df_res_combined, aes(x = residuals, fill = parameter)) +
+  geom_histogram(position = "identity", alpha = 0.6, bins = 30) +
+  labs(title = "Histogram of Residuals (As & Fe)", x = "Residuals", y = "Count") +
+  theme_minimal(base_size = 12) +
+  scale_fill_manual(values = c("red", "darkgreen"))
+
+# Arrange three plots in 2 columns and 2 rows (last row just has histogram centered)
+grid.arrange(
+  arrangeGrob(plot_res_as, plot_res_fe, ncol = 2),
+  plot_hist,
+  nrow = 2,
+  heights = c(2, 1)
+)
+
+
+
+
+
+remove.packages(c("ggplot2", "patchwork", "gtable", "scales", "gridExtra"))
+install.packages(c("ggplot2", "patchwork", "gtable", "scales", "gridExtra"))
+
+
+
+
+
+
+# Load necessary libraries
+library(ggplot2)
+library(gridExtra)
+
+library(ggplot2)
+library(gridExtra)
+
+# Combine As and Fe data
+combined_df <- rbind(
+  data.frame(actual = actual_as, predicted = pred_as, parameter = "As"),
+  data.frame(actual = actual_fe, predicted = pred_fe, parameter = "Fe")
+)
+
+# Shared plotting function
+plot_shared <- ggplot(combined_df, aes(x = actual, y = predicted, color = parameter)) +
+  geom_point(alpha = 0.7) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "green") +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE) +
+  facet_wrap(~parameter, scales = "free") +
+  labs(title = "Predicted vs Actual Values", x = "Actual", y = "", color = "Parameter") +
+  theme_classic(base_size = 11) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Print the plot with shared legend
+print(plot_shared)
+
+
+
+
+
+
+
+
+
+
+
+
+
+library(forecast)
+library(ggplot2)
+library(gridExtra)
+library(tidyr)
+library(dplyr)
+
+library(dplyr)
+
+# Ensure 'Date' column is Date class (adjust column name if needed)
+ANN_water_quality_data_2020$Date <- as.Date(ANN_water_quality_data_2020$Date)
+
+# Sort by Date
+data_sorted <- ANN_water_quality_data_2020 %>% arrange(Date)
+
+# Extract numeric year and month for ts start argument
+start_year <- as.numeric(format(min(data_sorted$Date), "%Y"))
+start_month <- as.numeric(format(min(data_sorted$Date), "%m"))
+
+freq <- 12  # Monthly data frequency
+
+# Create time series list
+ts_list <- list(
+  NH3 = ts(data_sorted$NH3, frequency = freq, start = c(start_year, start_month)),
+  Temp = ts(data_sorted$Temp, frequency = freq, start = c(start_year, start_month)),
+  EC = ts(data_sorted$EC, frequency = freq, start = c(start_year, start_month)),
+  Turbidity = ts(data_sorted$Turbidity, frequency = freq, start = c(start_year, start_month)),
+  Cl = ts(data_sorted$Cl, frequency = freq, start = c(start_year, start_month)),
+  PO4 = ts(data_sorted$PO4, frequency = freq, start = c(start_year, start_month)),
+  As = ts(data_sorted$As, frequency = freq, start = c(start_year, start_month)),
+  Fe = ts(data_sorted$Fe, frequency = freq, start = c(start_year, start_month))
+)
+
+
+
+
+
+# Load required libraries
+library(ggplot2)
+library(gridExtra)
+library(forecast)  # Optional, for better ts handling
+
+# Function to clean data, decompose, and plot STL
+plot_stl_full <- function(ts_data, param_name) {
+  # Remove NA, NaN, Inf
+  ts_data_clean <- ts_data[is.finite(ts_data)]
+  
+  # Make sure it’s long enough for STL (minimum ~24 points)
+  if (length(ts_data_clean) < 24) {
+    message(paste("Skipping", param_name, "- not enough valid data"))
+    return(NULL)
+  }
+  
+  # Create cleaned ts object with original frequency
+  ts_clean <- ts(ts_data_clean, frequency = 12)
+  
+  # STL decomposition
+  stl_decomp <- stl(ts_clean, s.window = "periodic")
+  
+  # Convert to data frame for ggplot
+  df_stl <- data.frame(
+    Time = time(ts_clean),
+    Seasonal = stl_decomp$time.series[, "seasonal"],
+    Trend = stl_decomp$time.series[, "trend"],
+    Remainder = stl_decomp$time.series[, "remainder"]
+  )
+  
+  # Plot each component
+  p1 <- ggplot(df_stl, aes(x = Time, y = Seasonal)) +
+    geom_line(color = "blue") +
+    labs(title = paste("Seasonal -", param_name), y = "Seasonal") +
+    theme_minimal()
+  
+  p2 <- ggplot(df_stl, aes(x = Time, y = Trend)) +
+    geom_line(color = "darkgreen") +
+    labs(title = paste("Trend -", param_name), y = "Trend") +
+    theme_minimal()
+  
+  p3 <- ggplot(df_stl, aes(x = Time, y = Remainder)) +
+    geom_line(color = "red") +
+    labs(title = paste("Remainder -", param_name), y = "Remainder") +
+    theme_minimal()
+  
+  # Combine all 3 plots
+  grid.arrange(p1, p2, p3, ncol = 1)
+}
+
+# Now loop through each parameter in ts_list and show STL plots
+for (param in names(ts_list)) {
+  cat("Processing:", param, "\n")
+  plot_stl_full(ts_list[[param]], param)
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##Trend analysis and plot show_5 parameters
+
+
+# Load required libraries
+library(ggplot2)
+library(gridExtra)
+
+# Function to create STL trend plot
+plot_stl_trend <- function(ts_data, param_name) {
+  # Remove NA, NaN, Inf
+  ts_data_clean <- ts_data[is.finite(ts_data)]
+  
+  # Ensure minimum data points
+  if (length(ts_data_clean) < 24) {
+    message(paste("Skipping", param_name, "- not enough valid data"))
+    return(NULL)
+  }
+  
+  ts_clean <- ts(ts_data_clean, frequency = 12)
+  stl_decomp <- stl(ts_clean, s.window = "periodic")
+  
+  df_trend <- data.frame(
+    Time = time(ts_clean),
+    Trend = stl_decomp$time.series[, "trend"]
+  )
+  
+  ggplot(df_trend, aes(x = Time, y = Trend)) +
+    geom_line(color = "darkgreen", size = 1) +
+    labs(title = paste("Trend -", param_name), x = "Time", y = "Trend") +
+    theme_minimal(base_size = 10)
+}
+
+# Create list of trend plots
+plot_list <- lapply(names(ts_list), function(p) plot_stl_trend(ts_list[[p]], p))
+
+# Filter out NULLs (in case of any short series)
+plot_list <- Filter(Negate(is.null), plot_list)
+
+# Arrange all plots in a 3x3 grid (if 8 plots, 1 will be blank)
+grid.arrange(grobs = plot_list, ncol = 3, top = "")
+
+
+
+
+
+# Load necessary libraries
+library(forecast)
+library(ggplot2)
+library(gridExtra)
+
+# Function to clean, model, and forecast a parameter
+forecast_param <- function(ts_data, param_name) {
+  ts_clean <- ts_data[is.finite(ts_data)]
+  
+  # Skip if not enough data
+  if (length(ts_clean) < 24) {
+    warning(paste("Skipping", param_name, "- not enough valid data"))
+    return(NULL)
+  }
+  
+  ts_series <- ts(ts_clean, frequency = 12)
+  
+  # Fit ARIMA model
+  fit <- auto.arima(ts_series)
+  
+  # Forecast 12 months
+  fc <- forecast(fit, h = 12)
+  
+  # Plot forecast
+  autoplot(fc) +
+    labs(title = paste("Forecast of", param_name),
+         x = "Time", y = param_name) +
+    theme_minimal(base_size = 13)
+}
+
+# Parameters to forecast
+params_to_forecast <- c("EC", "Fe", "Cl", "Temp")
+
+# Generate forecast plots
+forecast_plots <- list()
+for (p in params_to_forecast) {
+  message("Forecasting: ", p)
+  plt <- forecast_param(ts_list[[p]], p)
+  if (!is.null(plt)) forecast_plots[[p]] <- plt
+}
+
+# Plot forecasts together (if any)
+if (length(forecast_plots) > 0) {
+  grid.arrange(grobs = forecast_plots, ncol = 2, top = "")
+} else {
+  message("❌ No valid data found for selected parameters.")
+}
+ 
+
+
+
+
+#Model comparison table 
+library(forecast)
+
+# Create time series list with proper column names
+ts_list <- list(
+  EC = ts(data_sorted$EC, frequency = 12, start = c(2020, 1)),
+  Fe = ts(data_sorted$Fe, frequency = 12, start = c(2020, 1)),
+  Cl = ts(data_sorted$Cl, frequency = 12, start = c(2020, 1)),
+  Temp = ts(data_sorted$Temp, frequency = 12, start = c(2020, 1))
+)
+
+# Function to compute forecast accuracy
+forecast_accuracy_metrics <- function(ts_data, h = 12) {
+  n <- length(ts_data)
+  train <- window(ts_data, end = time(ts_data)[n - h])
+  test <- window(ts_data, start = time(ts_data)[n - h + 1])
+  
+  fit <- auto.arima(train)
+  forecasted <- forecast(fit, h = h)
+  
+  accuracy_metrics <- accuracy(forecasted, test)
+  
+  data.frame(
+    MAE = accuracy_metrics["Test set", "MAE"],
+    RMSE = accuracy_metrics["Test set", "RMSE"],
+    MAPE = accuracy_metrics["Test set", "MAPE"]
+  )
+}
+
+# Parameters to evaluate
+params <- c("EC", "Fe", "Cl", "Temp")
+
+# Generate accuracy table
+accuracy_table <- do.call(rbind, lapply(params, function(p) {
+  metrics <- forecast_accuracy_metrics(ts_list[[p]], h = 12)
+  metrics$Parameter <- p
+  metrics
+}))
+
+# Reorder columns
+accuracy_table <- accuracy_table[, c("Parameter", "MAE", "RMSE", "MAPE")]
+
+print(accuracy_table)
+
+
+
+
+write.csv(accuracy_table, "forecast_accuracy_table.csv", row.names = FALSE)
+
+
+
+
+
+
+
+
+
+
+
+#Predictive moddel_ANN
+
+
+# STEP 1: Install and Load Packages
+install.packages(c("readr", "dplyr", "caret", "neuralnet", "plotly"))
+library(readr)
+library(dplyr)
+library(caret)
+library(neuralnet)
+library(plotly)
+library(neuralnet)
+
+# STEP 2: Load the Dataset
+data <- read_csv("ANN_water quality data_2020.csv")
+
+# STEP 3: Clean Column Names
+colnames(data) <- gsub("\n", "", colnames(data))      # Remove newlines
+colnames(data) <- gsub("\\s+", "", colnames(data))    # Remove spaces
+
+# STEP 4: Drop Date Column and Ensure Numeric
+data_numeric <- data %>%
+  select(-Date) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  na.omit()  # Remove rows with missing data
+
+# STEP 5: Check if EC Column Exists
+if (!"EC" %in% colnames(data_numeric)) {
+  stop("EC column not found. Please check your dataset headers.")
+}
+
+# STEP 6: Train-Test Split
+set.seed(123)
+train_index <- createDataPartition(data_numeric$EC, p = 0.8, list = FALSE)
+train_data <- data_numeric[train_index, ]
+test_data <- data_numeric[-train_index, ]
+
+# STEP 7: Normalize Data
+preproc <- preProcess(train_data, method = c("range"))
+train_norm <- predict(preproc, train_data)
+test_norm <- predict(preproc, test_data)
+
+# STEP 8: Train ANN Model to Predict EC
+ann_model <- neuralnet(EC ~ Temp + Turbidity + Cl + Fe,
+                       data = train_norm,
+                       hidden = c(5, 3),
+                       linear.output = TRUE)
+
+predicted_norm <- neuralnet::compute(ann_model, test_norm[, c("Temp", "Turbidity", "Cl", "Fe")])$net.result
+
+# STEP 10: Denormalize Predictions
+EC_min <- min(data_numeric$EC)
+EC_max <- max(data_numeric$EC)
+pred_rescaled <- predicted_norm * (EC_max - EC_min) + EC_min
+actual_rescaled <- test_data$EC
+
+# STEP 11: Accuracy Metrics
+MAE <- mean(abs(pred_rescaled - actual_rescaled))
+RMSE <- sqrt(mean((pred_rescaled - actual_rescaled)^2))
+MAPE <- mean(abs((pred_rescaled - actual_rescaled) / actual_rescaled)) * 100
+Accuracy <- 100 - MAPE
+
+# STEP 12: Show Accuracy Table
+accuracy_table <- data.frame(
+  Metric = c("MAE", "RMSE", "MAPE", "Accuracy (%)"),
+  Value = round(c(MAE, RMSE, MAPE, Accuracy), 3)
+)
+print(accuracy_table)
+
+# STEP 13: Plot 3D EC vs Temp and Cl
+plot_ly(data = data_numeric,
+        x = ~Temp,
+        y = ~Cl,
+        z = ~EC,
+        type = "scatter3d",
+        mode = "markers",
+        marker = list(size = 4, color = ~EC, colorscale = "Viridis")) %>%
+  layout(title = "",
+         scene = list(
+           xaxis = list(title = "Temp (°C)"),
+           yaxis = list(title = "Cl mg/l)"),
+           zaxis = list(title = "EC (mS/cm)")
+         ))
+
+
+
+residuals <- actual_rescaled - pred_rescaled
+
+plot_ly(x = test_data$Temp,
+        y = test_data$Cl,
+        z = residuals,
+        type = "scatter3d",
+        mode = "markers",
+        marker = list(size = 4, color = residuals, colorscale = "RdBu")) %>%
+  layout(title = "Residuals: EC Prediction Error",
+         scene = list(
+           xaxis = list(title = "Temperature (°C)"),
+           yaxis = list(title = "Chloride (Cl mg/l)"),
+           zaxis = list(title = "Residuals (Actual - Predicted EC)")
+         ))
+
+
+
+plot_ly(x = test_data$Temp,
+        y = test_data$Cl,
+        z = as.numeric(pred_rescaled),
+        type = "scatter3d",
+        mode = "markers",
+        marker = list(size = 4, color = as.numeric(pred_rescaled), colorscale = "Viridis")) %>%
+  layout(title = "",
+         scene = list(
+           xaxis = list(title = "Temp (°C)"),
+           yaxis = list(title = "Cl (mg/l)"),
+           zaxis = list(title = "Predicted EC (mS/cm)")
+         ))
+
+
+residuals <- actual_rescaled - pred_rescaled
+
+
+
+
+
+
+
+library(ggplot2)
+
+library(ggplot2)
+
+library(ggplot2)
+
+# Prepare data
+plot_data <- data.frame(
+  Temp = test_data$Temp,
+  Actual_EC = actual_rescaled,
+  Predicted_EC = as.numeric(pred_rescaled)
+)
+
+# Reshape data to long format for easy ggplot handling
+library(tidyr)
+plot_data_long <- pivot_longer(plot_data, cols = c("Actual_EC", "Predicted_EC"),
+                               names_to = "Type", values_to = "EC")
+
+# Create plot
+ggplot(plot_data_long, aes(x = Temp, y = EC, color = Type, shape = Type)) +
+  geom_point(alpha = 0.7, size = 3) +
+  geom_smooth(method = "lm", se = TRUE, linetype = "solid", size = 1) +
+  scale_color_manual(values = c("Actual_EC" = "#1f78b4", "Predicted_EC" = "#e31a1c"),
+                     labels = c("Actual EC", "Predicted EC")) +
+  scale_shape_manual(values = c(16, 17),
+                     labels = c("Actual EC", "Predicted EC")) +
+  labs(
+    title = "Outstanding Plot: Temperature vs Electrical Conductivity (EC)",
+    subtitle = "Comparing Actual and ANN Predicted Values",
+    x = "Temperature (°C)",
+    y = "Electrical Conductivity (mS/cm)",
+    color = "Legend",
+    shape = "Legend"
+  ) +
+  theme_minimal(base_size = 15) +
+  theme(
+    legend.position = "top",
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", size = 18),
+    plot.subtitle = element_text(size = 13),
+    axis.title = element_text(face = "bold")
+  )
+
+
+
+
+
+
+
+
+
+
+
+library(readr)
+library(dplyr)
+library(caret)
+library(neuralnet)
+library(ggplot2)
+library(tidyr)
+
+# Load and preprocess
+data <- read_csv("ANN_water quality data_2020.csv")
+
+# Clean column names
+colnames(data) <- gsub("\n", "", colnames(data))
+colnames(data) <- gsub("\\s+", "", colnames(data))
+
+# Select numeric data and remove Date
+data_numeric <- data %>%
+  select(-Date) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  na.omit()
+
+# Function to train ANN for one target variable and plot regression with Temp
+train_and_plot <- function(target_var) {
+  # Check target exists
+  if (!(target_var %in% colnames(data_numeric))) {
+    stop(paste("Column", target_var, "not found!"))
+  }
+  
+  # Prepare train/test split
+  set.seed(123)
+  train_index <- createDataPartition(data_numeric[[target_var]], p = 0.8, list = FALSE)
+  train_data <- data_numeric[train_index, c("Temp", target_var)]
+  test_data <- data_numeric[-train_index, c("Temp", target_var)]
+  
+  # Normalize data
+  preproc <- preProcess(train_data, method = c("range"))
+  train_norm <- predict(preproc, train_data)
+  test_norm <- predict(preproc, test_data)
+  
+  # Train ANN model: Predict target_var from Temp only
+  formula_text <- as.formula(paste(target_var, "~ Temp"))
+  ann_model <- neuralnet(formula_text,
+                         data = train_norm,
+                         hidden = c(5,3),
+                         linear.output = TRUE)
+  
+  # Predict on test set
+  predicted_norm <- neuralnet::compute(ann_model, test_norm[, "Temp", drop=FALSE])$net.result
+  
+  # Rescale prediction to original scale
+  target_min <- min(data_numeric[[target_var]])
+  target_max <- max(data_numeric[[target_var]])
+  pred_rescaled <- predicted_norm * (target_max - target_min) + target_min
+  actual_rescaled <- test_data[[target_var]]
+  
+  # Prepare plot data
+  plot_data <- data.frame(
+    Temp = test_data$Temp,
+    Actual = actual_rescaled,
+    Predicted = as.numeric(pred_rescaled)
+  )
+  plot_data_long <- pivot_longer(plot_data, cols = c("Actual", "Predicted"),
+                                 names_to = "Type", values_to = "Value")
+  
+  # Plot Actual vs Predicted regression plot
+  p <- ggplot(plot_data_long, aes(x = Temp, y = Value, color = Type, shape = Type)) +
+    geom_point(alpha = 0.7, size = 3) +
+    geom_smooth(method = "lm", se = TRUE, size = 1) +
+    scale_color_manual(values = c("Actual" = "#1f78b4", "Predicted" = "#e31a1c")) +
+    scale_shape_manual(values = c(16, 17)) +
+    labs(
+      title = paste("Temp vs", target_var, ": Actual and ANN Predicted"),
+      x = "Temp (°C)",
+      y = target_var,
+      color = "Legend",
+      shape = "Legend"
+    ) +
+    theme_classic(base_size = 12) +
+    theme(legend.position = "right",
+          legend.title = element_text(face = "bold"),
+          plot.title = element_text(face = "bold"))
+  
+  print(p)
+  
+  # Return accuracy metrics
+  MAE <- mean(abs(pred_rescaled - actual_rescaled))
+  RMSE <- sqrt(mean((pred_rescaled - actual_rescaled)^2))
+  MAPE <- mean(abs((pred_rescaled - actual_rescaled) / actual_rescaled)) * 100
+  Accuracy <- 100 - MAPE
+  data.frame(Parameter = target_var,
+             MAE = round(MAE,3),
+             RMSE = round(RMSE,3),
+             MAPE = round(MAPE,3),
+             Accuracy_Percent = round(Accuracy,3))
+}
+
+# List of parameters to predict (except Temp)
+parameters <- c("EC", "Turbidity", "Cl", "Fe")
+
+# Run and collect accuracy
+results <- lapply(parameters, train_and_plot)
+results_df <- do.call(rbind, results)
+print(results_df)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+library(readr)
+library(dplyr)
+library(caret)
+library(neuralnet)
+library(tidyr)
+library(ggplot2)
+
+# Load and preprocess
+data <- read_csv("ANN water quality data_2020.csv")
+colnames(data) <- gsub("\n", "", colnames(data))
+colnames(data) <- gsub("\\s+", "", colnames(data))
+
+data_numeric <- data %>%
+  select(-Date) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  na.omit()
+
+# List parameters to predict
+parameters <- c("EC", "Turbidity", "Cl", "Fe")
+
+# Prepare an empty dataframe to store results for plotting
+all_results <- data.frame()
+
+set.seed(123)
+
+for (target_var in parameters) {
+  # Train-test split
+  train_index <- createDataPartition(data_numeric[[target_var]], p = 0.8, list = FALSE)
+  train_data <- data_numeric[train_index, c("Temp", target_var)]
+  test_data <- data_numeric[-train_index, c("Temp", target_var)]
+  
+  # Normalize
+  preproc <- preProcess(train_data, method = "range")
+  train_norm <- predict(preproc, train_data)
+  test_norm <- predict(preproc, test_data)
+  
+  # Train ANN
+  formula_text <- as.formula(paste(target_var, "~ Temp"))
+  ann_model <- neuralnet(formula_text, data = train_norm, hidden = c(5,3), linear.output = TRUE)
+  
+  # Predict
+  predicted_norm <- neuralnet::compute(ann_model, test_norm[, "Temp", drop=FALSE])$net.result
+  
+  # Rescale prediction
+  target_min <- min(data_numeric[[target_var]])
+  target_max <- max(data_numeric[[target_var]])
+  pred_rescaled <- predicted_norm * (target_max - target_min) + target_min
+  actual_rescaled <- test_data[[target_var]]
+  
+  # Combine actual and predicted in long format
+  df <- data.frame(
+    Temp = test_data$Temp,
+    Value = c(actual_rescaled, pred_rescaled),
+    Type = rep(c("Actual", "Predicted"), each = length(actual_rescaled)),
+    Parameter = target_var
+  )
+  
+  all_results <- rbind(all_results, df)
+}
+
+# Plot all parameters with lines colored by Parameter and linetype by Actual/Predicted
+ggplot(all_results, aes(x = Temp, y = Value, color = Parameter, linetype = Type)) +
+  geom_line(size = 1) +
+  geom_point(alpha = 0.6, size = 1.8) +
+  labs(
+    title = "Temperature vs Water Quality Parameters (Actual & ANN Predicted)",
+    x = "Temperature (°C)",
+    y = "Parameter Value",
+    color = "Parameter",
+    linetype = "Data Type"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "top",
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold")
+  )
+
+
+
+
+
+
+
+
+
+
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+# Select only needed columns: Temp and parameters
+stream_data <- data_numeric %>%
+  select(Temp, EC, Turbidity, Cl, Fe)
+
+# Reshape to long format for ggplot
+stream_long <- stream_data %>%
+  pivot_longer(cols = -Temp, names_to = "Parameter", values_to = "Value")
+
+# Order by Temp for smooth lines
+stream_long <- stream_long %>%
+  arrange(Parameter, Temp)
+
+# Plot stacked area (stream) chart
+ggplot(stream_long, aes(x = Temp, y = Value, fill = Parameter)) +
+  geom_area(alpha = 0.8) +
+  labs(
+    title = "Stream Chart: Water Quality Parameters vs Temperature (In Situ Data)",
+    x = "Temperature (°C)",
+    y = "Parameter Value",
+    fill = "Parameter"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "top",
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold")
+  )
+
+
+
+
+
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+
+
+# Prepare data
+stream_data <- data_numeric %>%
+  select(Temp, EC, Turbidity, Cl, Fe)
+
+stream_long <- stream_data %>%
+  pivot_longer(cols = -Temp, names_to = "Parameter", values_to = "Value") %>%
+  arrange(Parameter, Temp)
+
+# Choose a color palette for 4 parameters
+palette_colors <- brewer.pal(n = 4, name = "Set2")
+
+# Plot
+p <- ggplot(stream_long, aes(x = Temp, y = Value, fill = Parameter)) +
+  geom_area(alpha = 0.6, position = "identity") +         # overlapping filled areas
+  geom_line(aes(color = Parameter), size = 1.5) +          # thick colored lines
+  geom_point(aes(color = Parameter), size = 4, alpha = 0.8) + # big points for data
+  scale_fill_manual(values = palette_colors) +
+  scale_color_manual(values = palette_colors) +
+  labs(
+    title = "Water Quality Parameters vs Temperature (In Situ Data)",
+    subtitle = "Stream chart showing full variation of EC, Turbidity, Cl, and Fe",
+    x = "Temperature (°C)",
+    y = "Parameter Value",
+    fill = "Parameter",
+    color = "Parameter"
+  ) +
+  theme_minimal(base_size = 18) +
+  theme(
+    legend.position = "top",
+    legend.title = element_text(face = "bold", size = 14),
+    legend.text = element_text(size = 13),
+    plot.title = element_text(face = "bold", size = 22, margin = margin(b = 10)),
+    plot.subtitle = element_text(size = 16, margin = margin(b = 20)),
+    axis.title = element_text(face = "bold", size = 16),
+    axis.text = element_text(size = 14)
+  )
+
+# For large display or export (optional)
+print(p)
+
+
+
+
+library(ggplot2)
+library(viridis)  # for better color scale
+library(hexbin)
+
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(viridis)
+
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(viridis)
+
+# Check your actual column names with colnames(data_numeric)
+
+# Reshape data for faceted hexbin plotting
+long_data <- data_numeric %>%
+  select(Temp, EC, Fe, Cl, `NH3.N`, PO4, As, TUR) %>%
+  pivot_longer(cols = -Temp, names_to = "Parameter", values_to = "Value")
+
+# Create faceted hexbin plot
+hex_all_plot <- ggplot(long_data, aes(x = Temp, y = Value)) +
+  geom_hex(bins = 30) +
+  scale_fill_viridis(option = "C", direction = -1, name = "Density") +
+  facet_wrap(~Parameter, scales = "free_y") +
+  labs(
+    title = "Hexbin Density Maps: Temperature vs Water Quality Parameters",
+    x = "Temperature (°C)",
+    y = "Parameter Value"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    plot.title = element_text(face = "bold", size = 20, hjust = 0.5),
+    axis.title = element_text(face = "bold", size = 14),
+    axis.text = element_text(size = 12),
+    strip.text = element_text(face = "bold", size = 14),
+    legend.title = element_text(face = "bold", size = 14),
+    legend.text = element_text(size = 12)
+  )
+
+# Display plot
+print(hex_all_plot)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Install required packages (if not already installed)
+install.packages("leaflet")
+install.packages("dplyr")
+
+# Load libraries
+library(leaflet)
+library(dplyr)
+
+# Step 1: Create the data frame
+lat <- c(
+  rep(1.73822, 6),
+  rep(2.508866, 6),
+  rep(2.495044, 6),
+  rep(2.555327, 6),
+  rep(2.645166, 6),
+  rep(2.670972, 6),
+  rep(2.346864, 6),
+  rep(2.276353, 6),
+  rep(2.1731, 6),
+  rep(2.129566, 6),
+  rep(2.149794, 6),
+  rep(2.245846, 6),
+  rep(2.20135, 6),
+  rep(2.184066, 6),
+  rep(2.180695, 6),
+  rep(2.518507, 6),
+  rep(2.656854, 3)
+)
+
+lon <- c(
+  rep(103.712711, 6),
+  rep(102.818465, 6),
+  rep(102.751534, 6),
+  rep(102.761998, 6),
+  rep(102.76616, 6),
+  rep(102.734758, 6),
+  rep(102.82965, 6),
+  rep(102.811884, 6),
+  rep(102.712766, 6),
+  rep(102.645416, 6),
+  rep(102.599671, 6),
+  rep(102.808848, 6),
+  rep(102.749416, 6),
+  rep(102.746183, 6),
+  rep(102.734849, 6),
+  rep(102.836512, 6),
+  rep(102.671811, 3)
+)
+
+# Combine into data frame
+location_data <- data.frame(LATITUDE = lat, LONGITUDE = lon)
+
+# Step 2: Create the map
+leaflet(location_data) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    ~LONGITUDE, ~LATITUDE,
+    radius = 4,
+    color = "red",
+    fillOpacity = 0.7,
+    stroke = FALSE,
+    label = ~paste("Lat:", LATITUDE, "<br>", "Lon:", LONGITUDE)
+  ) %>%
+  addMiniMap()
+
